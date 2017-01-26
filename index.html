@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Drill down in Firebase</title>
+    <script src="https://unpkg.com/react@latest/dist/react.js"></script>
+    <script src="https://unpkg.com/react-dom@latest/dist/react-dom.js"></script>
+    <script src="https://unpkg.com/babel-standalone@6.15.0/babel.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/3.6.2/firebase.js"></script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="text/babel">
+      // Firebase configuration
+      // Replace this with configuration for you Firebase project.
+      // You can import the json from README.md to get started.
+      let config = {
+        apiKey: "",
+        authDomain: "",
+        databaseURL: "",
+        storageBucket: "",
+        messagingSenderId: ""
+      };
+
+      // Constants used to build query ranges.
+      let FIRST_KEY = "000";
+      let LAST_KEY = "999";
+      let UNDER = '|';
+      let DIRECT = '|>';
+
+      // This is the important part.
+      class Fetcher {
+        constructor(dbRef) {
+          this.dbRef = dbRef;
+        }
+
+        /* Returns a Promise that resolves to a map of the direct childrens to
+        the given key. */
+        fetch(key) {
+          let range = this.getRange(key);
+          console.log(`range start:${range.start} end:${range.end}`);
+
+          let query = this.dbRef.orderByKey()
+            .startAt(range.start).endAt(range.end);
+
+          return new Promise((resolve, reject) =>
+            query.once('value').then(snapshot => resolve(snapshot))
+          ).then(snapshot => this.snapshotToMap(snapshot));
+        }
+
+        fetchParent(key) {
+          return this.fetch(getParentKey(key));
+        }
+
+        getParentKey(key) {
+          let fragments = key.split(UNDER);
+          return fragments.slice(0, fragments.length-1).join(UNDER);
+        }
+
+        getRange(key) {
+          let base = key.length ? key.replace(DIRECT, UNDER) + DIRECT : '';
+          return {start: base+FIRST_KEY, end: base+LAST_KEY};
+        }
+
+        snapshotToMap(snapshot) {
+          var map = new Map();
+          snapshot.forEach(childSnap => {
+            map.set(childSnap.key, childSnap.val());
+          });
+          return map;
+        }
+      }
+
+      // The rest is just UI.
+
+      function bindCallbacks(callbacks, that) {
+        callbacks.forEach(name => {
+          that[name] = that[name].bind(that);
+        })
+      }
+
+      class Menu extends React.Component {
+        constructor(props) {
+          super(props);
+          this.state = {
+            key: '',
+            menu: new Map()
+          };
+          bindCallbacks(['handleBack', 'updateKey'], this);
+        }
+
+        componentDidMount() {
+          this.props.fetcher.fetch('')
+            .then(menu => this.setState({menu}));
+        }
+
+        updateKey(key) {
+          this.props.fetcher.fetch(key)
+            .then(menu => this.setState({key, menu}));
+        }
+
+        handleBack() {
+          let key = this.props.fetcher.getParentKey(this.state.key);
+          this.props.fetcher.fetch(key)
+            .then(menu => this.setState({key, menu}));
+        }
+
+        render() {
+          let menu = this.state.menu;
+          return (
+            <div>
+              <p>{this.state.key}</p>
+              <a href="#" onClick={this.handleBack}>Back</a>
+              <MenuItems entries={[...menu]} updateKey={this.updateKey} />
+            </div>
+          );
+        }
+      }
+
+      class MenuItems extends React.Component {
+        render() {
+          let updateKey = this.props.updateKey;
+          let items = this.props.entries.map(entry =>
+            <MenuItem key={entry[0]} entry={entry} updateKey={updateKey} />
+          );
+          return <ul>{items}</ul>;
+        }
+      }
+
+      class MenuItem extends React.Component {
+        render() {
+          let key = this.props.entry[0];
+          let name = this.props.entry[1].name;
+          let handleClick = _ => this.props.updateKey(key);
+          return (
+            <li id={key} key={key}>
+              <a href="#" onClick={handleClick}>{name} ({key})</a>
+            </li>
+          );
+        }
+      }
+
+      function init(config) {
+        let app = firebase.initializeApp(config);
+        let db = app.database();
+
+        let fetcher = new Fetcher(db.ref('/menu/store_id'));
+
+        ReactDOM.render(
+          <Menu fetcher={fetcher} />,
+          document.getElementById('root')
+        );
+      }
+
+      init(config);
+    </script>
+  </body>
+</html>
